@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>有福之州 · 路景同览 | 卫星底图</title>
+    <link rel="stylesheet" href="https://js.arcgis.com/4.32/esri/themes/light/main.css">
+    <script src="https://js.arcgis.com/4.32/"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e6b3b, #2a8e4a);
+            color: white;
+            padding: 12px 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 10;
+        }
+        .header h1 { font-size: 1.6rem; margin-bottom: 4px; }
+        .header p { font-size: 0.85rem; opacity: 0.9; }
+        .main-container {
+            flex: 1;
+            display: flex;
+            gap: 0;
+            overflow: hidden;
+        }
+        .map-container {
+            flex: 3;
+            position: relative;
+        }
+        #viewDiv {
+            width: 100%;
+            height: 100%;
+        }
+        .basemap-gallery {
+            width: 300px;
+            background: rgba(30, 40, 45, 0.85);
+            backdrop-filter: blur(12px);
+            border-left: 1px solid rgba(255,255,255,0.15);
+            padding: 16px;
+            overflow-y: auto;
+            color: #e0f2fe;
+        }
+        .basemap-gallery h3 {
+            font-size: 1.1rem;
+            margin-bottom: 12px;
+            border-left: 4px solid #2a8e4a;
+            padding-left: 12px;
+        }
+        .esri-basemap-gallery {
+            background: transparent !important;
+        }
+        .esri-basemap-gallery__item {
+            background: rgba(0,0,0,0.4);
+            border-radius: 12px;
+            margin-bottom: 8px;
+        }
+        .esri-basemap-gallery__item--selected {
+            background: #2c6e9e;
+            box-shadow: 0 0 0 2px #a0d0ff;
+        }
+        .esri-legend {
+            background: white !important;
+            color: black !important;
+            border: 1px solid #ccc !important;
+            border-radius: 6px !important;
+            max-width: 220px;
+        }
+        .esri-layer-list {
+            max-width: 240px !important;
+        }
+        .custom-controls {
+            position: absolute;
+            top: 60px;
+            right: 16px;
+            z-index: 100;
+            display: flex;
+            gap: 8px;
+            background: transparent;
+        }
+        .custom-search-container {
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            padding: 4px 8px;
+            gap: 4px;
+        }
+        .custom-search-container input {
+            border: none;
+            outline: none;
+            padding: 6px 8px;
+            width: 180px;
+            font-size: 14px;
+            border-radius: 20px;
+        }
+        .custom-search-container button {
+            background: #2a8e4a;
+            border: none;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .custom-search-container button:hover {
+            background: #1e6b3b;
+        }
+        .locate-btn {
+            background: white;
+            border: none;
+            border-radius: 30px;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.2s;
+        }
+        .locate-btn:hover {
+            background: #f0f0f0;
+            transform: scale(1.02);
+        }
+        @media (max-width: 768px) {
+            .main-container { flex-direction: column; }
+            .basemap-gallery { width: 100%; height: 130px; flex-direction: row; overflow-x: auto; padding: 10px; }
+            .custom-controls { top: 70px; right: 8px; }
+            .custom-search-container input { width: 140px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏞️ 有福之州 · 路景同览</h1>
+        <p>有福之州 · 畅游路网与景区 | 卫星底图</p>
+    </div>
+    <div class="main-container">
+        <div class="map-container">
+            <div id="viewDiv"></div>
+            <div class="custom-controls">
+                <div class="custom-search-container">
+                    <input type="text" id="spotSearchInput" placeholder="输入景点名称..." autocomplete="off">
+                    <button id="spotSearchBtn">搜索</button>
+                </div>
+                <button id="locateBtn" class="locate-btn" title="定位我的位置">📍</button>
+            </div>
+        </div>
+        <div class="basemap-gallery">
+            <h3>🗺️ 切换底图</h3>
+            <div id="galleryDiv"></div>
+        </div>
+    </div>
+
+    <script>
+        require([
+            "esri/Map",
+            "esri/views/MapView",
+            "esri/layers/FeatureLayer",
+            "esri/widgets/ScaleBar",
+            "esri/widgets/Legend",
+            "esri/widgets/LayerList",
+            "esri/widgets/BasemapGallery",
+            "esri/rest/support/Query"
+        ], (Map, MapView, FeatureLayer, ScaleBar, Legend, LayerList, BasemapGallery, Query) => {
+
+            const spotsUrl = 'https://www.geosceneonline.cn/server/rest/services/Hosted/fz景点/FeatureServer/0';
+            const roadsUrl = 'https://www.geosceneonline.cn/server/rest/services/Hosted/主干路fz/FeatureServer/0';
+
+            const spotsLayer = new FeatureLayer({
+                url: spotsUrl,
+                title: "A级旅游景区",
+                renderer: {
+                    type: "unique-value",
+                    field: "等级",
+                    defaultSymbol: {
+                        type: "simple-marker",
+                        color: "#95a5a6",
+                        outline: { color: "white", width: 1 },
+                        size: 8,
+                        style: "circle"
+                    },
+                    defaultLabel: "其他景点",
+                    uniqueValueInfos: [
+                        { value: "5A", symbol: { type: "simple-marker", color: "#d43f1f", outline: { color: "white", width: 1 }, size: 14, style: "circle" }, label: "5A级景区" },
+                        { value: "4A", symbol: { type: "simple-marker", color: "#f39c12", outline: { color: "white", width: 1 }, size: 10, style: "circle" }, label: "4A级景区" },
+                        { value: "3A", symbol: { type: "simple-marker", color: "#27ae60", outline: { color: "white", width: 1 }, size: 9, style: "circle" }, label: "3A级景区" },
+                        { value: "无", symbol: { type: "simple-marker", color: "#3498db", outline: { color: "white", width: 1 }, size: 7, style: "circle" }, label: "其他景点" }
+                    ]
+                },
+                popupTemplate: {
+                    title: "{景点名}",
+                    content: "等级: {等级}<br>所在区: {城市_区}"
+                }
+            });
+
+            const roadsLayer = new FeatureLayer({
+                url: roadsUrl,
+                title: "道路网",
+                renderer: {
+                    type: "unique-value",
+                    field: "fclass",
+                    defaultSymbol: { type: "simple-line", color: "#bdbdbd", width: 2, style: "solid" },
+                    defaultLabel: "其他道路",
+                    uniqueValueInfos: [
+                        { value: "primary", symbol: { type: "simple-line", color: "#1b5e20", width: 4, style: "solid" }, label: "主干道" },
+                        { value: "secondary", symbol: { type: "simple-line", color: "#2e7d32", width: 3.5, style: "solid" }, label: "次干道" },
+                        { value: "tertiary", symbol: { type: "simple-line", color: "#4caf50", width: 3, style: "solid" }, label: "三级道路" },
+                        { value: "residential", symbol: { type: "simple-line", color: "#81c784", width: 2.5, style: "solid" }, label: "居住区道路" }
+                    ]
+                },
+                popupTemplate: {
+                    title: "{name}",
+                    content: "道路等级: {fclass}"
+                }
+            });
+
+            // 默认底图：卫星影像图 (satellite)
+            const map = new Map({
+                basemap: "satellite",
+                layers: [spotsLayer, roadsLayer]
+            });
+
+            const view = new MapView({
+                container: "viewDiv",
+                map: map,
+                center: [119.2965, 26.0745],
+                zoom: 12
+            });
+
+            view.ui.add(new ScaleBar({ view: view, unit: "metric" }), "bottom-left");
+            view.ui.add(new Legend({ view: view }), "bottom-right");
+            view.ui.add(new LayerList({ view: view }), "top-left");
+
+            // 官方底图库，包含街道、卫星、地形、灰色等多种底图，无需密钥
+            new BasemapGallery({ view: view, container: "galleryDiv" });
+
+            // 景点搜索（自动定位并弹窗）
+            const searchInput = document.getElementById("spotSearchInput");
+            const searchBtn = document.getElementById("spotSearchBtn");
+
+            async function searchSpot() {
+                const keyword = searchInput.value.trim();
+                if (!keyword) {
+                    alert("请输入景点名称");
+                    return;
+                }
+                const query = new Query({
+                    where: `景点名 LIKE '%${keyword}%'`,
+                    outFields: ["景点名", "等级", "城市_区"],
+                    returnGeometry: true
+                });
+                try {
+                    const result = await spotsLayer.queryFeatures(query);
+                    if (result.features.length === 0) {
+                        alert(`未找到包含“${keyword}”的景点`);
+                        return;
+                    }
+                    const feature = result.features[0];
+                    const geometry = feature.geometry;
+                    const attrs = feature.attributes;
+                    await view.goTo({ target: geometry, zoom: 15 });
+                    view.openPopup({
+                        title: attrs.景点名,
+                        content: `等级: ${attrs.等级}<br>所在区: ${attrs.城市_区}`,
+                        location: geometry
+                    });
+                } catch (err) {
+                    console.error("查询失败", err);
+                    alert("搜索失败，请检查网络或图层权限");
+                }
+            }
+
+            searchBtn.addEventListener("click", searchSpot);
+            searchInput.addEventListener("keypress", (e) => {
+                if (e.key === "Enter") searchSpot();
+            });
+
+            // 定位按钮
+            const locateBtn = document.getElementById("locateBtn");
+            locateBtn.addEventListener("click", () => {
+                view.locate().then(() => {
+                    console.log("定位成功");
+                }).catch(error => {
+                    console.warn("定位失败", error);
+                    alert("无法获取您的位置，请检查浏览器权限");
+                });
+            });
+
+            view.when(() => console.log("地图加载完成"));
+        });
+    </script>
+</body>
+</html>
